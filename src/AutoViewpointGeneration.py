@@ -17,7 +17,6 @@ from dataclasses import dataclass, field
 from sklearn.cluster import KMeans  # . . . . . . . . K-means
 from sklearn import preprocessing
 from sklearn.preprocessing import minmax_scale
-from matplotlib import colormaps
 from pathlib import Path
 from math import pi, sin, cos
 from bayes_opt import BayesianOptimization
@@ -307,8 +306,6 @@ class PointCloudPartitioner:
 
     k: int = 1
     point_weight: float = 1
-    lamda_weight: float = 1
-    beta_weight: float = 1
     normal_weight: float = 1
     initial_method: str = "random"
     maximum_iterations: int = 100
@@ -324,6 +321,12 @@ class PointCloudPartitioner:
     valid_pcds = []
     overall_packing_efficiency = 0
     total_point_out_percentage=0
+    b_opt_init_points=1
+    b_opt_iteration_points=3
+    b_opt_range_multiplier=3
+    b_opt_aquisition_function="ei"
+    b_opt_lamda_weight: float = 100
+    b_opt_beta_weight: float = 2
     
 
     def evaluate_cluster_dof(self, pcd: PointCloud, camera: Camera):
@@ -654,34 +657,33 @@ class PointCloudPartitioner:
             total_packing_eff=total_packing_eff/total_count
 
 
-            initial_beta=self.beta_weight
+            initial_beta=self.b_opt_beta_weight
             
             if(total_point_out_percentage>0.001):
                 # print(total_point_out_percentage)
                 s=0
             else:
-                print("total_point_out_percentage is zero")
                 s=1
                 if(anyborderline==True):
                      s=0
                 # print(total_packing_eff)
                 
-            total_cost = (self.lamda_weight)*total_point_out_percentage + s*((1/total_packing_eff)**initial_beta)
+            total_cost = (self.b_opt_lamda_weight)*total_point_out_percentage + s*((1/total_packing_eff)**initial_beta)
             
         return -total_cost
 
     def optimize_k(self, pcd: PointCloud, camera: Camera, eval_fun: callable, bs_high: int = 1) -> int:
         """ Function to perform K-Means binary search with evaluation to determine optimal number of clusters for inspection """
-        print('Finding bs_high...')
+        print('Finding K upper bound...')
         while (True):
             valid, pcd_1, cost = self.evaluate_k(
                 copy.deepcopy(pcd), bs_high, camera, eval_fun, tries=1)
             if not valid:
                 print(
-                    f'bs_high = {bs_high} is not valid, incrementing bs_high...')
+                    f'K_high = {bs_high} is not valid, incrementing K_high...')
                 bs_high *= 2
             else:
-                print(f'bs_high = {bs_high} is valid. Optimizing k...')
+                print(f'K_high = {bs_high} is valid. Starting Binary search between K_high/2 and K_high...')
                 break
         bs_mid = 0
         bs_low = max(bs_high//2, 1)
@@ -691,12 +693,13 @@ class PointCloudPartitioner:
             k = bs_mid
             valid, pcds,_= self.evaluate_k(
                 copy.deepcopy(pcd), k, camera, eval_fun)
-            print(f'k: {k}, Valid: {valid}')
+            print(f'K: {k}, Valid: {valid}')
             if not valid:
                 bs_low = bs_mid + 1
             else:
                 valid_pcds = pcds
                 bs_high = bs_mid
+        print(f'K: {bs_high} is valid for DOF K-means clustering.')
 
         k = bs_high
 
@@ -710,10 +713,10 @@ class PointCloudPartitioner:
             self.eval_tries=0
             temp_mesh, _ = pcd.compute_convex_hull(joggle_inputs=True)
             area=temp_mesh.get_surface_area()/2
-            print(area)
+            print("total area of planar segment", area)
             n_est = area/camera.get_area()
-            print("min area found",n_est)
-            pbounds={"k":(n_est,3*n_est)}
+            print("K_min",n_est)
+            pbounds={"k":(n_est,self.b_opt_range_multiplier*n_est)}
 
             optimizer=BayesianOptimization(
                         f=self.evaluate_k_cost_filter,
@@ -721,10 +724,10 @@ class PointCloudPartitioner:
                         verbose=2, #verbose=1 prints only at max, verbose=0 is silent
                         random_state=1,    
                     )
-            acq_function = UtilityFunction(kind="ei", kappa=5)
+            acq_function = UtilityFunction(kind=self.b_opt_aquisition_function, kappa=5)
             optimizer.maximize(
-                init_points=1,
-                n_iter=3,  
+                init_points=self.b_opt_init_points,
+                n_iter=self.b_opt_iteration_points,  
                 )
             y=optimizer.max
             k=max(1,int(y["params"]["k"]))
