@@ -3,22 +3,15 @@
 # __________________________________________________________
 import os
 import sys
-import yaml
 import time
-import json
 import copy
 import math
 import random
-import platform
 import numpy as np
 import pytransform3d.rotations as pr
 import open3d as o3d  # . . . . . . . . . . . . . . . Open3D
-import matplotlib.pyplot as plt
-import open3d.visualization.gui as gui
-import open3d.visualization.rendering as rendering
 from open3d.geometry import TriangleMesh, PointCloud
 from open3d.visualization.rendering import MaterialRecord
-from pprint import pprint
 from datetime import datetime
 from dataclasses import dataclass, field
 from sklearn.cluster import KMeans  # . . . . . . . . K-means
@@ -27,8 +20,6 @@ from sklearn.preprocessing import minmax_scale
 from matplotlib import colormaps
 from pathlib import Path
 from math import pi, sin, cos
-from time import sleep
-import pandas as pd
 from bayes_opt import BayesianOptimization
 from bayes_opt import UtilityFunction
 
