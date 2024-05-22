@@ -2,7 +2,7 @@
 
 Requires `python 3.10.0`
 
-## Dependencies required to run Bayesian Segmentation jupiter notebook
+## Dependencies required to run Bayesian Segmentation Jupiter notebook
 
 Install dependencies.
 ```
