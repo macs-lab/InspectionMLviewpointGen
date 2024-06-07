@@ -758,7 +758,7 @@ class PointCloudPartitioner:
         return k, valid_pcds
 
    
-# Region growing not added to the smart partition function
+# Region growing added to the smart partition function
     def smart_partition(self, spcd: SurfacePointCloud, camera: Camera) -> list:
         """ Partition PCD into Planar Patches, partition Planar Patches into Regions. """
         print(f'Partitioning part into planar patches:')
@@ -769,23 +769,68 @@ class PointCloudPartitioner:
         self.total_point_out_percentage=0
         self.camera_common=copy.deepcopy(camera)
         self.ppsqmm = spcd.ppsqmm
-        print(self.ppsqmm)
-        k_dof, planar_pcds = self.optimize_k(
-            copy.deepcopy(spcd.pcd), camera, self.evaluate_cluster_dof)
+        theta_th = 4.0 / 180.0 * math.pi  # in radians
+        cur_th = 0.01
+        num_nieghbors = 30
+        pcd = spcd.pcd
+        rg_regions = []
         region_pcds = []
-        initial_normal_weight = self.normal_weight
-        self.normal_weight = 0
-        for i, planar_pcd in enumerate(planar_pcds):
+        self.total_planar_pcds = 0
 
-            print(f'Partitioning planar patch {i} into regions:')
-            self.pcd_common=copy.deepcopy(planar_pcd)
-            k_roi, pcds = self.optimize_k_b_opt(copy.deepcopy(
-                planar_pcd), camera, self.evaluate_cluster_fov)
+        #store point cloud as numpy array
+        unique_rows = np.asarray(pcd.points)
+        #Generate a KDTree object
+        pcd_tree = o3d.geometry.KDTreeFlann(pcd)
+
+        search_results = []
+
+        #search for 10 nearest neighbors for each point in the point cloud and store the k value, index of the nearby points and their distances them in search_results
+        for point in pcd.points:
+            try:
+                result = pcd_tree.search_knn_vector_3d(point, num_nieghbors)
+                search_results.append(result)
+            except RuntimeError as e:
+                print(f"An error occurred with point {point}: {e}")
+                continue
+
+        #separate the k and index values from the search_results
+
+        k_values = [result[0] for result in search_results]
+        nn_glob = [result[1] for result in search_results]
+        distances = [result[2] for result in search_results]
+
+        region1 = self.regiongrowing1(unique_rows, nn_glob, theta_th, cur_th)
+        #visualize the region with each region having different color
+        colors = np.random.rand(len(region1),3)  #generating random colors
+        pcd_colors = np.zeros((len(pcd.points), 3))  #initializing the color array 
+        #region stored
+        # colour all regions with points less than 1000 with grey and remove them
+
+        initial_normal_weight = self.normal_weight
+        for i in range(len(region1)):
+            if len(region1[i]) < 0.005*len(unique_rows):
+                continue
+            else:
+                pcd_i = copy.deepcopy(pcd.select_by_index(region1[i]))
+                rg_regions.append(pcd_i)
+        for j,rg_region in enumerate(rg_regions):
+            k_dof, planar_pcds = self.optimize_k(
+                copy.deepcopy(rg_region), camera, self.evaluate_cluster_dof)
+            region_planar_pcds = []
             
-            region_pcds += copy.deepcopy(pcds)
+            self.normal_weight = 0
+            for i, planar_pcd in enumerate(planar_pcds):
+
+                print(f'Partitioning planar patch {i} into regions:')
+                self.pcd_common=copy.deepcopy(planar_pcd)
+                k_roi, pcds = self.optimize_k_b_opt(copy.deepcopy(
+                    planar_pcd), camera, self.evaluate_cluster_fov)
+                self.total_planar_pcds += 1
+                region_planar_pcds += copy.deepcopy(pcds)
+            region_pcds.extend(region_planar_pcds)
         self.normal_weight = initial_normal_weight
-        total_packing_efficiency=self.overall_packing_efficiency/len(planar_pcds)
-        total_point_out_percentage=self.total_point_out_percentage/len(planar_pcds)
+        total_packing_efficiency=self.overall_packing_efficiency/self.total_planar_pcds
+        total_point_out_percentage=self.total_point_out_percentage/self.total_planar_pcds
         print("overall packing efficiency",total_packing_efficiency)
         print("total point out percentage",total_point_out_percentage)
         return region_pcds
