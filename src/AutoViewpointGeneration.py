@@ -20,7 +20,7 @@ from sklearn.preprocessing import minmax_scale
 from pathlib import Path
 from math import pi, sin, cos
 from bayes_opt import BayesianOptimization
-from bayes_opt import UtilityFunction
+from bayes_opt import acquisition
 
 @dataclass
 class SurfaceModel:
@@ -717,14 +717,15 @@ class PointCloudPartitioner:
             n_est = area/camera.get_area()
             print("K_min",n_est)
             pbounds={"k":(n_est,self.b_opt_range_multiplier*n_est)}
-
+            acquisition_function = acquisition.ExpectedImprovement(xi=0.01)
             optimizer=BayesianOptimization(
                         f=self.evaluate_k_cost_filter,
+                        acquisition_function=acquisition_function,
                         pbounds=pbounds,
                         verbose=2, #verbose=1 prints only at max, verbose=0 is silent
                         random_state=1,    
                     )
-            acq_function = UtilityFunction(kind=self.b_opt_aquisition_function, kappa=5)
+            #acq_function = UtilityFunction(kind=self.b_opt_aquisition_function, kappa=5)
             optimizer.maximize(
                 init_points=self.b_opt_init_points,
                 n_iter=self.b_opt_iteration_points,  
