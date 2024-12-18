@@ -6,7 +6,7 @@ Requires `python 3.10.0`
 
 Install dependencies.
 ```
-pip3 install open3d==0.17.0 scikit-learn pytransform3d numpy bayesian-optimization ipykernel
+pip3 install open3d==0.17.0 scikit-learn pytransform3d numpy==1.26.4 bayesian-optimization==2.0.2 ipykernel
 ```
 
 ## To run the Bayesian Segmentation
