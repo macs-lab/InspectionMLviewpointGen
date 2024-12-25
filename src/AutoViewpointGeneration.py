@@ -260,12 +260,14 @@ class SurfaceResampler:
         if pcd_file.exists():
             pcd = o3d.io.read_point_cloud(str(pcd_file))
             pcd.estimate_normals()
+            # pcd.orient_normals_consistent_tangent_plane(3)
         else:
             number_of_points = int(
                 self.points_per_square_mm * model.mesh.get_surface_area())
-            pcd = model.mesh.sample_points_poisson_disk(number_of_points)
-            pcd.estimate_normals()
-            pcd.orient_normals_consistent_tangent_plane(10)
+            pcd = model.mesh.sample_points_poisson_disk(
+                number_of_points, use_triangle_normal=True)
+            # pcd.estimate_normals()
+            # pcd.orient_normals_consistent_tangent_plane(3)
             # o3d.visualization.draw_geometries([pcd], point_show_normal=True)
             o3d.io.write_point_cloud(str(pcd_file), pcd, print_progress=True)
 
@@ -425,8 +427,8 @@ class PointCloudPartitioner:
         max_height = camera.dof
         point_height=abs(z_max-z_min)
         packing_eff = point_height/max_height
-        
-        return valid,point_out_percentage,packing_eff, objs    # return valid, cost, green_count, objs
+        borderline=0
+        return valid,point_out_percentage,packing_eff, objs , borderline # return valid, cost, green_count, objs
 
     def evaluate_cluster_fov(self, pcd: PointCloud, camera: Camera):
         """ Function to be implemented for testing different ways of evaluating validity of a cluster. """
@@ -607,7 +609,7 @@ class PointCloudPartitioner:
             pcds = self.partition(copy.deepcopy(pcd), k)
             k_valid = True
             for j, pcd_1 in enumerate(pcds):
-                cluster_valid, cost,_, _ = eval_fun(copy.deepcopy(pcd_1), camera)
+                cluster_valid, cost,_, _, _= eval_fun(copy.deepcopy(pcd_1), camera)
                 k_valid = k_valid and cluster_valid
                 # print(f'k-{k} pcd {j}: {cluster_valid}')
                 if not cluster_valid:
@@ -740,7 +742,7 @@ class PointCloudPartitioner:
             total_packing_eff=0
            
             for j, pcd_1 in enumerate(valid_pcds):
-                cluster_valid, point_out_percentage,packing_eff, _,borderline = eval_fun(copy.deepcopy(pcd_1), camera)
+                cluster_valid, point_out_percentage,packing_eff, _ ,borderline= eval_fun(copy.deepcopy(pcd_1), camera)
                 total_point_out_percentage += point_out_percentage
                 total_packing_eff+=packing_eff
                 total_count+=1
@@ -789,6 +791,28 @@ class PointCloudPartitioner:
         total_point_out_percentage=self.total_point_out_percentage/len(planar_pcds)
         print("overall packing efficiency",total_packing_efficiency)
         print("total point out percentage",total_point_out_percentage)
+        return region_pcds
+    
+    def normal_partition(self, spcd: SurfacePointCloud, camera: Camera) -> list:
+        """ Partition PCD into Planar Patches, partition Planar Patches into Regions. """
+        print(f'Partitioning part into planar patches:')
+
+        k_dof, planar_pcds = self.optimize_k(
+            copy.deepcopy(spcd.pcd), camera, self.evaluate_cluster_dof)
+        region_pcds = []
+        planar_patch_normal_weight = self.normal_weight
+        self.normal_weight = 0
+        self.point_weight = 1
+        for i, planar_pcd in enumerate(planar_pcds):
+
+            print(f'Partitioning planar patch {i} into regions:')
+            temp_mesh, _ = planar_pcd.compute_convex_hull(joggle_inputs=True)
+            n_est = temp_mesh.get_surface_area()/camera.get_area()
+            print(temp_mesh.get_surface_area()/2)
+            k_roi, pcds = self.optimize_k(copy.deepcopy(
+                planar_pcd), camera, self.evaluate_cluster_fov, bs_high=max(1,int(n_est/2) ))
+            region_pcds += copy.deepcopy(pcds)
+        self.normal_weight = planar_patch_normal_weight
         return region_pcds
 
     def display_inlier_outlier(self, cloud, ind):
@@ -1036,7 +1060,13 @@ class AutoViewpointGeneration:
 
     sides: dict = field(default_factory=dict)
     selected_side: str = None
-
+    
+    def normal_partition(self):
+        """ Calls partitioning service to partition surface into planar patches then regions. """
+        pcds = self.pcd_partitioner.normal_partition(self.spcd, self.camera)
+        print(pcds)
+        return pcds
+    
     def load_model(self, file, units, color):
         """ Function to reset app and load a new model. """
         print(f'Loading model from {file}')
@@ -1089,6 +1119,8 @@ class AutoViewpointGeneration:
         """ Calls partitioning service to optmize k for partitioning """
         print("App optimizing k")
         return self.pcd_partitioner.optimize_k(self.spcd.pcd, self.camera, self.pcd_partitioner.evaluate_cluster_dof)
+    
+
 
     def smart_partition(self):
         """ Calls partitioning service to partition surface into planar patches then regions. """
@@ -1097,6 +1129,8 @@ class AutoViewpointGeneration:
         print(pcds)
         return pcds
         # self.pcds_to_regions(pcds)
+
+
 
     def evaluate_k_cost(self, k):
         """ Calls partitioning service to partition surface into planar patches then regions. """
